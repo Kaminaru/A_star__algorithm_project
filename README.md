@@ -9,4 +9,4 @@ Plans for future versions:
 
 # Goals of this Project
 - Learn about A*
-- Learn about GUI in Python
+- Learn about PyQt5 GUI in Python
