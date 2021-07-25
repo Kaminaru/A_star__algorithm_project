@@ -1,23 +1,20 @@
-from PyQt5.QtCore import * 
-from PyQt5.QtGui import * 
-from PyQt5.QtWidgets import * 
+from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QWidget, QLabel, QApplication, QGridLayout
 import sys
 
 from queue import PriorityQueue
 import threading
 import time
 
+board = [] # global reference to the board (2D list with Node objects)
 startPoint = False # tells if we decided the start point/label
 endPoint = False # tells if we decided the end point/label
 
 leftClick = False # detects if leftClick is pressed down
 rightClick = False # detects if rightClick is pressed down
-
-board = None
-
-trueNodeSize = 0
-
 stopThread = False # to be able to kill thread easy way
+
+trueNodeSize = 0 # size of the node block on the window
 
 class Window(QWidget):
     def __init__(self, HEIGHT, WIDTH):
@@ -27,41 +24,40 @@ class Window(QWidget):
         self.setFixedWidth(WIDTH)
         self.setFixedHeight(HEIGHT)
 
-        self.board = [] # board will all rows where each row is own list with each Node object on the board
         self.solvingThread = threading.Thread(target=self.solveBoard, args = ())
 
         self.show()
 
-    def keyPressEvent(self, e):
+    def keyPressEvent(self, e): # called after button on keyboard is pressed
         global stopThread
         if e.key() == Qt.Key_R: # Button "R" is for reset of the board
-            stopThread = True
+            stopThread = True # solveBoard() function will stop after that, that will lead to thread beeing killed
             self.resetBoard()
         elif e.key() == Qt.Key_S: # Button "S" is for start: program will find solution
             if not self.solvingThread.is_alive(): # do not let do anything while thread is running
                 if startPoint == True and endPoint == True:
-                    #_thread.start_new_thread(self.solveBoard, ())
                     stopThread = False
                     self.solvingThread = threading.Thread(target=self.solveBoard, args = ())
                     self.solvingThread.start()
-            
 
     def resetBoard(self):
-        global startPoint
-        global endPoint
+        # sets every Node to "white stage"
+        global startPoint, endPoint
         startPoint = False
         endPoint = False
-        for row in self.board:
+        for row in board:
             for node in row:
                 node.changeColor("white")
                 node.getLabel().setStyleSheet("border : 1px solid grey; background : rgb(255, 255, 255);")
 
     def createBoard(self, numberOfRows, numberOfCol):
+        # creates board with QGrid and many clickable QLabels
         grid = QGridLayout()
         grid.setContentsMargins(0,0,0,0)
         grid.setSpacing(0)
         self.setLayout(grid)
-
+        
+        tmpBoard = []
         for i in range(numberOfRows):
             rowList = []
             for j in range(numberOfCol):
@@ -70,24 +66,38 @@ class Window(QWidget):
                 newNode = Node(i, j)
                 newNode.setLabel(newLabel)
                 newLabel.addNodePointer(newNode)
-                # newLabel.installEventFilter(self) # CHECK if works CONNECTS TO eventFilter function
+
                 rowList.append(newNode)
                 grid.addWidget(newLabel,i,j)
-            self.board.append(rowList)
-        
+            tmpBoard.append(rowList)
         global board
-        board = self.board
-
-        return self.board
+        board = tmpBoard
 
     def findmanhattanDistance(self, startNode, endNode):
+        # Finds and returns Manhattan distance from the start to the end Node object in the 2D board list
         x1 = startNode.getX()
         y1 = startNode.getY()
         x2 = endNode.getX()
         y2 = endNode.getY()
         return abs(x1-x2) + abs(y1-y2)
+
+    def setNeighbours(self):
+        # go through each node and finds his neighbours and add those nodes to the list of neigbours for each node
+        for i in range(len(board)):
+            for j in range(len(board[0])):
+                neighbours = []
+                if i-1 >= 0 and board[i-1][j].getColor() != "black": # up
+                    neighbours.append(board[i-1][j])
+                if i+1 < len(board)-1 and board[i+1][j].getColor() != "black": # down
+                    neighbours.append(board[i+1][j])
+                if j-1 >= 0 and board[i][j-1].getColor() != "black": # left
+                    neighbours.append(board[i][j-1])
+                if j+1 < len(board[0])-1 and board[i][j+1].getColor() != "black": # right
+                    neighbours.append(board[i][j+1])
+                board[i][j].changeNeighborList(neighbours)
         
     def reconstruct_path(self, cameFrom, currentNode, startNode):
+        # paints the shortest path from start to the end point
         while currentNode in cameFrom:
             currentNode = cameFrom[currentNode]
             if currentNode != startNode:
@@ -110,14 +120,13 @@ class Window(QWidget):
         # h(n) estimated cost to the target node/end node. In our case we use manhattan distance to find it.
         # The node with the lowest f(n) is the one that we will choose
         cameFrom = {} # refers to the Node object where we came from (the lowest value came from)
-        gScore = {node : float('inf') for row in self.board for node in row}
+        gScore = {node : float('inf') for row in board for node in row}
         gScore[startNode] = 0
-        fScore = {node : float('inf') for row in self.board for node in row}
+        fScore = {node : float('inf') for row in board for node in row}
         fScore[startNode] = self.findmanhattanDistance(startNode, endNode) # no need g, because there is no g(n) for start node 
 
         while not nextNodeQueue.empty():
-            global stopThread
-            if not stopThread:
+            if not stopThread: # in case we want to stop thread by pressing "R" key while it's running
                 currentNode = nextNodeQueue.get()[2]
                 if currentNode.getColor() == "end":
                     self.reconstruct_path(cameFrom, currentNode, startNode)
@@ -150,51 +159,19 @@ class Window(QWidget):
         return False
 
     def findStartAndEnd(self):
-        startNode = None
-        endNode = None
-        for i in range(len(self.board)):
-            for j in range(len(self.board[0])):
-                if self.board[i][j].getColor() == "start":
-                    startNode = self.board[i][j]
-                elif self.board[i][j].getColor() == "end":
-                    endNode = self.board[i][j]
+        for i in range(len(board)):
+            for j in range(len(board[0])):
+                if board[i][j].getColor() == "start":
+                    startNode = board[i][j]
+                elif board[i][j].getColor() == "end":
+                    endNode = board[i][j]
         return startNode, endNode
 
-    def setNeighbours(self):
-        # go through each node and finds his neihnours and add those nodes to the list of neigbours for each node
-        for i in range(len(self.board)):
-            for j in range(len(self.board[0])):
-                neighbours = []
-                if i-1 >= 0 and self.board[i-1][j].getColor() != "black": # up
-                    neighbours.append(self.board[i-1][j])
-                if i+1 < len(self.board)-1 and self.board[i+1][j].getColor() != "black": # down
-                    neighbours.append(self.board[i+1][j])
-                if j-1 >= 0 and self.board[i][j-1].getColor() != "black": # left
-                    neighbours.append(self.board[i][j-1])
-                if j+1 < len(self.board[0])-1 and self.board[i][j+1].getColor() != "black": # right
-                    neighbours.append(self.board[i][j+1])
-       
-                self.board[i][j].changeNeighborList(neighbours)
-
-
-    # def eventFilter(self, object, event):
-    #     # if event.type() == QEvent.Enter:
-    #     #     print("OK")
-    #     #     print(object)
-    #     #     return True
-    #     if event.type() == QEvent.MouseButtonPress:
-    #         print("OK")
-    #         print(object)
-    #         return True
-    #     return False
-
-
 class clickableQLabel(QLabel):
+    # own class that imports QLabel however it will also have QMouseEvents with left and right clicks
     nodePointer = None
-    left_clicked = pyqtSignal()
-    right_clicked = pyqtSignal()
-
     def mouseReleaseEvent(self, QMouseEvent):
+        # If mouse realesed, we won't change any colors for any label we hover over
         global leftClick, rightClick
         if leftClick == True:
             leftClick = False
@@ -202,44 +179,44 @@ class clickableQLabel(QLabel):
             rightClick = False
 
     def mousePressEvent(self, QMouseEvent):
+        # Mouse right click changing one label back to white
+        # Mouse left click changing one label to start position, end positon or black (if start and end is chosen)
         global startPoint, endPoint, leftClick, rightClick
         if QMouseEvent.button() == Qt.LeftButton:
-            leftClick = True
+            leftClick = True # tells that left button is pressed (will be used in mouseMoveEvent() function)
             if self.nodePointer.getColor() == "white":
-                if startPoint == False: # if we don't have start
+                if startPoint == False: # if we don't have start point
                     self.nodePointer.changeColor("start") # or in other words blue
-                    self.nodePointer.getLabel().setStyleSheet("background : blue;")
+                    self.setStyleSheet("background : blue;")
                     startPoint = True
-                elif endPoint == False: # if we don't have end
-                    self.nodePointer.changeColor("end") # or in other words yellow
-                    self.nodePointer.getLabel().setStyleSheet("background : green;")
+                elif endPoint == False: # if we don't have end, but we have start point
+                    self.nodePointer.changeColor("end") # or in other words green
+                    self.setStyleSheet("background : green;")
                     endPoint = True
-                else:
+                else: # if we have start and end point
                     self.nodePointer.changeColor("black")
-                    self.nodePointer.getLabel().setStyleSheet("border : 1px solid grey; background : rgb(0, 0, 0);")
-
-            #self.left_clicked.emit()
+                    self.setStyleSheet("border : 1px solid grey; background : rgb(0, 0, 0);")
         elif QMouseEvent.button() == Qt.RightButton:
-            rightClick = True
-            # check if this is a start or end node
+            rightClick = True # tells that right button is pressed (will be used in mouseMoveEvent() function)
+            # check if this is a start or end node. We need to reset information about startPoint or endPoint
             if self.nodePointer.getColor() == "start":
                 startPoint = False
             elif self.nodePointer.getColor() == "end":
                 endPoint = False
             # reset lable to back to white
             self.nodePointer.changeColor("white")
-            self.nodePointer.getLabel().setStyleSheet("border : 1px solid grey; background : rgb(255, 255, 255);")
+            self.setStyleSheet("border : 1px solid grey; background : rgb(255, 255, 255);")
                 
-            # self.right_clicked.emit()
-
     def mouseMoveEvent(self, event):
-        global board, startPoint, endPoint, leftClick, rightClick, trueNodeSize
-        x = event.windowPos().x()
-        y = event.windowPos().y()
+        # If right or left mouse button is pressed, and start and end point is chosen, we will change color to black 
+        # to whatever other lable we hover over with the mouse pointer
+        global startPoint, endPoint
+        x = event.windowPos().x() # x position of the mouse pointer on the window
+        y = event.windowPos().y() # y position of the mouse pointer on the window
+        # changing x,y cordinates to [i][j] position in the 2D board list by using node side size
         i = int(y/trueNodeSize)
         j = int(x/trueNodeSize)
-        if i < len(board) and i >= 0 and j < len(board[0]) and j >= 0:
-            # print(i,j)
+        if i < len(board) and i >= 0 and j < len(board[0]) and j >= 0: # checks if i and j is not out of boundaries
             curNode = board[i][j]
             if leftClick and curNode.getColor() != "start" and curNode.getColor() != "end":
                 if startPoint and endPoint:
@@ -259,7 +236,7 @@ class clickableQLabel(QLabel):
 
 class Node():
     def __init__(self, x, y):
-        self.neighbors = []
+        self.neighbors = [] # list of the neighbors to this node
         self.labelPointer = None
         self.color = "white"
         self.x = x # x position in the board list
@@ -294,20 +271,15 @@ class Node():
 
 
 if __name__ == "__main__":
-    WIDTH = 800
-    numberOfCol = 50
-    numberOfRows = 50
-
+    WIDTH = 900
+    numberOfCol = 35
+    numberOfRows = 35
     trueNodeSize = WIDTH/numberOfCol
-
     sizeOfNode = int(WIDTH/numberOfCol)
     HEIGHT = int(sizeOfNode*numberOfRows)
 
     app = QApplication(sys.argv)
     window = Window(HEIGHT, WIDTH)
 
-    board = window.createBoard(numberOfRows, numberOfCol)
-
+    window.createBoard(numberOfRows, numberOfCol)
     sys.exit(app.exec_())
-    
-
